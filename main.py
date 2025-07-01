@@ -14,26 +14,219 @@ SCREEN_HEIGHT = 240
 SCALE = 2
 
 # マリオのパラメータ
-# 最高速度（通常/Bダッシュ）、加速度、減速度
-MARIO_WALK_MAX_SPEED = 2.2 * SCALE  # 通常歩き最大速度
-MARIO_DASH_MAX_SPEED = 4.0 * SCALE  # Bダッシュ最大速度
-MARIO_ACCEL = 0.15 * SCALE          # 加速度
-MARIO_DECEL = 0.18 * SCALE          # 減速度
-MARIO_AIR_ACCEL = 0.08 * SCALE      # 空中加速度
-MARIO_AIR_DECEL = 0.10 * SCALE      # 空中減速度
+MARIO_WALK_MAX_SPEED = 2.2 * SCALE
+MARIO_DASH_MAX_SPEED = 4.0 * SCALE
+MARIO_ACCEL = 0.15 * SCALE
+MARIO_DECEL = 0.18 * SCALE
+MARIO_AIR_ACCEL = 0.08 * SCALE
+MARIO_AIR_DECEL = 0.10 * SCALE
 
-# ジャンプ力と重力を初代スーパーマリオの仕様に近づけて調整
-JUMP_POWER = 5.2 * SCALE  # ピョーンの高さを少し低く設定
-GRAVITY = 0.5 * SCALE     # 重力も少し弱めに
-JUMP_HOLD_TIME = 12       # ホールド時間も短めに
+JUMP_POWER = 5.2 * SCALE
+GRAVITY = 0.5 * SCALE
+JUMP_HOLD_TIME = 12
 
 # クリボーのパラメータ
-KURIBO_WALK_SPEED = 1.0 * SCALE  # クリボーの歩行速度
-KURIBO_GRAVITY = GRAVITY         # クリボーにも同じ重力を適用
+KURIBO_WALK_SPEED = 1.0 * SCALE
+KURIBO_GRAVITY = GRAVITY
 
 def load_and_scale(path):
     img = pygame.image.load(path).convert_alpha()
     return pygame.transform.scale(img, (img.get_width() * SCALE, img.get_height() * SCALE))
+
+class Mario(pygame.sprite.Sprite):
+    def __init__(self, images, pos, floor_rect):
+        super().__init__()
+        self.images = images  # dict: stand, walk(list), jump, death
+        self.image = self.images['stand']
+        self.rect = self.image.get_rect()
+        self.rect.midbottom = pos
+        self.vx = 0.0
+        self.vy = 0.0
+        self.on_ground = False
+        self.facing_right = True
+        self.walk_frame = 0
+        self.walk_timer = 0
+        self.MARIO_WALK_ANIM_INTERVAL = 6
+        self.jumping = False
+        self.jump_hold_count = 0
+        self.dead = False
+        self.death_timer = 0
+        self.MARIO_DEATH_JUMP_VY = -8.0 * SCALE
+        self.MARIO_DEATH_GRAVITY = 0.35 * SCALE
+        self.MARIO_DEATH_DURATION = 120
+        self.floor_rect = floor_rect
+
+    def update(self, keys):
+        if not self.dead:
+            dash = keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]
+            max_speed = MARIO_DASH_MAX_SPEED if dash else MARIO_WALK_MAX_SPEED
+            accel = MARIO_ACCEL if self.on_ground else MARIO_AIR_ACCEL
+            decel = MARIO_DECEL if self.on_ground else MARIO_AIR_DECEL
+
+            move_left = keys[pygame.K_LEFT]
+            move_right = keys[pygame.K_RIGHT]
+
+            if move_left and not move_right:
+                if self.vx > -max_speed:
+                    self.vx -= accel
+                    if self.vx < -max_speed:
+                        self.vx = -max_speed
+                self.facing_right = False
+            elif move_right and not move_left:
+                if self.vx < max_speed:
+                    self.vx += accel
+                    if self.vx > max_speed:
+                        self.vx = max_speed
+                self.facing_right = True
+            else:
+                if self.vx > 0:
+                    self.vx -= decel
+                    if self.vx < 0:
+                        self.vx = 0
+                elif self.vx < 0:
+                    self.vx += decel
+                    if self.vx > 0:
+                        self.vx = 0
+
+            # ジャンプ処理
+            if keys[pygame.K_SPACE]:
+                if self.on_ground and not self.jumping:
+                    self.vy = -JUMP_POWER
+                    self.jumping = True
+                    self.jump_hold_count = 0
+                    self.on_ground = False
+                elif self.jumping and self.jump_hold_count < JUMP_HOLD_TIME:
+                    self.vy -= 0.35 * SCALE
+                    self.jump_hold_count += 1
+            else:
+                self.jumping = False
+
+            self.rect.x += int(self.vx)
+            self.vy += GRAVITY
+            self.rect.y += int(self.vy)
+
+            # 床との接地判定
+            if self.rect.colliderect(self.floor_rect):
+                if self.vy >= 0 and self.rect.bottom - self.floor_rect.top < 32 * SCALE:
+                    self.rect.bottom = self.floor_rect.top
+                    self.vy = 0
+                    self.on_ground = True
+                    self.jumping = False
+                    self.jump_hold_count = 0
+                else:
+                    self.on_ground = False
+            else:
+                self.on_ground = False
+
+            # 画面外に出ないように
+            if self.rect.left < 0:
+                self.rect.left = 0
+                self.vx = 0
+            if self.rect.right > SCREEN_WIDTH * SCALE:
+                self.rect.right = SCREEN_WIDTH * SCALE
+                self.vx = 0
+
+            # アニメーション
+            if abs(self.vx) > 0.5 and self.on_ground:
+                self.walk_timer += 1
+                if self.walk_timer >= self.MARIO_WALK_ANIM_INTERVAL:
+                    self.walk_frame = (self.walk_frame + 1) % len(self.images['walk'])
+                    self.walk_timer = 0
+                self.image = self.images['walk'][self.walk_frame]
+            elif not self.on_ground:
+                self.image = self.images['jump']
+                self.walk_frame = 0
+                self.walk_timer = 0
+            else:
+                self.image = self.images['stand']
+                self.walk_frame = 0
+                self.walk_timer = 0
+
+            if not self.facing_right:
+                self.image = pygame.transform.flip(self.image, True, False)
+        else:
+            # 死亡時
+            self.vx = 0
+            self.vy += self.MARIO_DEATH_GRAVITY
+            self.rect.y += int(self.vy)
+            self.death_timer += 1
+            self.image = self.images['death']
+            if self.death_timer > self.MARIO_DEATH_DURATION or self.rect.top > SCREEN_HEIGHT * SCALE:
+                return 'dead'  # signal to quit
+
+    def die(self):
+        self.dead = True
+        self.death_timer = 0
+        self.vy = self.MARIO_DEATH_JUMP_VY
+        self.jumping = False
+        self.on_ground = False
+
+class Kuribo(pygame.sprite.Sprite):
+    def __init__(self, images, death_img, pos, floor_rect):
+        super().__init__()
+        self.images = images  # list: walk frames
+        self.death_img = death_img
+        self.image = self.images[0]
+        self.rect = self.image.get_rect()
+        self.rect.midbottom = pos
+        self.vx = -KURIBO_WALK_SPEED
+        self.vy = 0.0
+        self.on_ground = False
+        self.frame = 0
+        self.timer = 0
+        self.KURIBO_ANIM_INTERVAL = 16
+        self.squashed = False
+        self.squash_timer = 0
+        self.KURIBO_SQUASH_DURATION = 40
+        self.alive = True
+        self.floor_rect = floor_rect
+
+    def update(self):
+        if not self.squashed:
+            self.rect.x += int(self.vx)
+            self.vy += KURIBO_GRAVITY
+            self.rect.y += int(self.vy)
+
+            # 床との接地判定
+            if self.rect.colliderect(self.floor_rect):
+                if self.vy >= 0 and self.rect.bottom - self.floor_rect.top < 32 * SCALE:
+                    self.rect.bottom = self.floor_rect.top
+                    self.vy = 0
+                    self.on_ground = True
+                else:
+                    self.on_ground = False
+            else:
+                self.on_ground = False
+
+            # 画面端で反転
+            if self.rect.left < 0:
+                self.rect.left = 0
+                self.vx = KURIBO_WALK_SPEED
+            if self.rect.right > SCREEN_WIDTH * SCALE:
+                self.rect.right = SCREEN_WIDTH * SCALE
+                self.vx = -KURIBO_WALK_SPEED
+
+            # アニメーション
+            self.timer += 1
+            if self.timer >= self.KURIBO_ANIM_INTERVAL:
+                self.frame = (self.frame + 1) % 2
+                self.timer = 0
+            self.image = self.images[self.frame]
+        else:
+            self.squash_timer += 1
+            self.image = self.death_img
+            # 潰れた画像の下端を元のクリボーの下端に合わせる
+            death_rect = self.death_img.get_rect()
+            death_rect.midbottom = self.rect.midbottom
+            self.rect = death_rect
+            if self.squash_timer >= self.KURIBO_SQUASH_DURATION:
+                self.alive = False
+
+    def squash(self):
+        self.squashed = True
+        self.squash_timer = 0
+        self.vx = 0
+        self.vy = 0
 
 def main():
     pygame.init()
@@ -48,71 +241,44 @@ def main():
         load_and_scale(os.path.join("images", "mario004.png")),
     ]
     mario_jump = load_and_scale(os.path.join("images", "mario_jump.png"))
-    mario_death = load_and_scale(os.path.join("images", "mario_death.png"))  # 死亡画像
+    mario_death = load_and_scale(os.path.join("images", "mario_death.png"))
 
-    # クリボーの画像を1枚だけ読み込む
     kuribo_img = load_and_scale(os.path.join("images", "kuribo.png"))
-    # クリボーの歩行アニメーションは、左右反転画像を使ってパタパタ歩くようにする
     kuribo_walk = [
         kuribo_img,
         pygame.transform.flip(kuribo_img, True, False)
     ]
-    # 潰れたクリボー画像の読み込み
     kuribo_death_img = load_and_scale(os.path.join("images", "kuribo_death.png"))
 
-    # クリボーの初期位置を設定（床の上、左側に表示）
-    kuribo_rect = kuribo_img.get_rect()
-    kuribo_rect.midbottom = (80 * SCALE, FLOOR_Y * SCALE)
-
-    # クリボーのアニメーション用変数
-    kuribo_frame = 0
-    kuribo_timer = 0
-    # 本家マリオのクリボー歩行アニメは16フレームごとに切り替え（60fpsなら約0.27秒ごと）
-    KURIBO_ANIM_INTERVAL = 16
-
-    # クリボーの移動・物理用変数
-    kuribo_vx = -KURIBO_WALK_SPEED  # 最初は左向きに移動
-    kuribo_vy = 0.0
-    kuribo_on_ground = False
-
-    # クリボーの状態管理
-    kuribo_alive = True
-    kuribo_squashed = False
-    kuribo_squash_timer = 0
-    KURIBO_SQUASH_DURATION = 40  # 潰れてから消えるまでのフレーム数（約0.66秒）
-
-    # マリオの初期位置
-    mario_rect = mario_stand.get_rect()
-    mario_rect.midbottom = (SCREEN_WIDTH * SCALE // 2, (FLOOR_Y - 40) * SCALE)
-    mario_vx = 0.0
-    mario_vy = 0.0
-    on_ground = False
-    facing_right = True
-
-    walk_frame = 0
-    walk_timer = 0
-
-    # 歩きアニメーションのフレーム間隔（小さいほど速く切り替わる）
-    MARIO_WALK_ANIM_INTERVAL = 6
-
-    # ジャンプホールド用変数
-    jumping = False
-    jump_hold_count = 0
-
-    # 死亡状態管理
-    mario_dead = False
-    mario_death_timer = 0
-    MARIO_DEATH_JUMP_VY = -8.0 * SCALE  # 死亡時のジャンプ初速度
-    MARIO_DEATH_GRAVITY = 0.35 * SCALE  # 死亡時の重力（本家は少し弱め）
-    MARIO_DEATH_DURATION = 120  # 死亡演出の長さ（2秒）
-
-    # 床のRect
     floor_rect = pygame.Rect(
         0,
         FLOOR_Y * SCALE,
         SCREEN_WIDTH * SCALE,
         FLOOR_HEIGHT * SCALE
     )
+
+    # スプライト生成
+    mario = Mario(
+        images={
+            'stand': mario_stand,
+            'walk': mario_walk,
+            'jump': mario_jump,
+            'death': mario_death
+        },
+        pos=(SCREEN_WIDTH * SCALE // 2, (FLOOR_Y - 40) * SCALE),
+        floor_rect=floor_rect
+    )
+
+    kuribo = Kuribo(
+        images=kuribo_walk,
+        death_img=kuribo_death_img,
+        pos=(80 * SCALE, FLOOR_Y * SCALE),
+        floor_rect=floor_rect
+    )
+
+    all_sprites = pygame.sprite.Group()
+    all_sprites.add(mario)
+    all_sprites.add(kuribo)
 
     clock = pygame.time.Clock()
     running = True
@@ -124,207 +290,36 @@ def main():
 
         keys = pygame.key.get_pressed()
 
-        if not mario_dead:
-            # Bダッシュ判定（左シフトまたは右シフト）
-            dash = keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]
-            max_speed = MARIO_DASH_MAX_SPEED if dash else MARIO_WALK_MAX_SPEED
-            accel = MARIO_ACCEL if on_ground else MARIO_AIR_ACCEL
-            decel = MARIO_DECEL if on_ground else MARIO_AIR_DECEL
+        # マリオの更新
+        mario_result = mario.update(keys)
+        if mario_result == 'dead':
+            running = False
 
-            move_left = keys[pygame.K_LEFT]
-            move_right = keys[pygame.K_RIGHT]
-
-            # 左右移動の加減速処理
-            if move_left and not move_right:
-                if mario_vx > -max_speed:
-                    mario_vx -= accel
-                    if mario_vx < -max_speed:
-                        mario_vx = -max_speed
-                facing_right = False
-            elif move_right and not move_left:
-                if mario_vx < max_speed:
-                    mario_vx += accel
-                    if mario_vx > max_speed:
-                        mario_vx = max_speed
-                facing_right = True
-            else:
-                # 減速（慣性で滑る）
-                if mario_vx > 0:
-                    mario_vx -= decel
-                    if mario_vx < 0:
-                        mario_vx = 0
-                elif mario_vx < 0:
-                    mario_vx += decel
-                    if mario_vx > 0:
-                        mario_vx = 0
-
-            # ジャンプ処理（ホールドで高さ変化）
-            if keys[pygame.K_SPACE]:
-                if on_ground and not jumping:
-                    # ジャンプ開始
-                    mario_vy = -JUMP_POWER
-                    jumping = True
-                    jump_hold_count = 0
-                    on_ground = False
-                elif jumping and jump_hold_count < JUMP_HOLD_TIME:
-                    # ジャンプ中にスペースを押し続けている間は上昇速度を維持
-                    mario_vy -= 0.35 * SCALE  # 追加で上昇力を与える（値を控えめに）
-                    jump_hold_count += 1
-            else:
-                # スペースを離したらジャンプホールド終了
-                jumping = False
-
-            # 横移動
-            mario_rect.x += int(mario_vx)
-
-            # 重力
-            mario_vy += GRAVITY
-            mario_rect.y += int(mario_vy)
-
-            # 床との接地判定
-            if mario_rect.colliderect(floor_rect):
-                # マリオが床の上にいる場合のみ着地
-                if mario_vy >= 0 and mario_rect.bottom - floor_rect.top < 32 * SCALE:
-                    mario_rect.bottom = floor_rect.top
-                    mario_vy = 0
-                    on_ground = True
-                    jumping = False
-                    jump_hold_count = 0
-                else:
-                    on_ground = False
-            else:
-                on_ground = False
-
-            # 画面外に出ないように
-            if mario_rect.left < 0:
-                mario_rect.left = 0
-                mario_vx = 0
-            if mario_rect.right > SCREEN_WIDTH * SCALE:
-                mario_rect.right = SCREEN_WIDTH * SCALE
-                mario_vx = 0
-
+        # クリボーの更新
+        if kuribo.alive:
+            kuribo.update()
         else:
-            # 死亡時の挙動
-            mario_vx = 0  # 横移動なし
-            mario_vy += MARIO_DEATH_GRAVITY
-            mario_rect.y += int(mario_vy)
-            mario_death_timer += 1
-            # 死亡演出が終わったら終了（またはリセット等）
-            if mario_death_timer > MARIO_DEATH_DURATION or mario_rect.top > SCREEN_HEIGHT * SCALE:
-                running = False
+            all_sprites.remove(kuribo)
 
-        # --- ここからクリボーの移動・重力処理 ---
-        if kuribo_alive:
-            if not kuribo_squashed:
-                # 横移動
-                kuribo_rect.x += int(kuribo_vx)
-
-                # 重力
-                kuribo_vy += KURIBO_GRAVITY
-                kuribo_rect.y += int(kuribo_vy)
-
-                # 床との接地判定
-                if kuribo_rect.colliderect(floor_rect):
-                    # クリボーが床の上にいる場合のみ着地
-                    if kuribo_vy >= 0 and kuribo_rect.bottom - floor_rect.top < 32 * SCALE:
-                        kuribo_rect.bottom = floor_rect.top
-                        kuribo_vy = 0
-                        kuribo_on_ground = True
-                    else:
-                        kuribo_on_ground = False
-                else:
-                    kuribo_on_ground = False
-
-                # 画面端で反転
-                if kuribo_rect.left < 0:
-                    kuribo_rect.left = 0
-                    kuribo_vx = KURIBO_WALK_SPEED  # 右向きに反転
-                if kuribo_rect.right > SCREEN_WIDTH * SCALE:
-                    kuribo_rect.right = SCREEN_WIDTH * SCALE
-                    kuribo_vx = -KURIBO_WALK_SPEED  # 左向きに反転
-
-            # --- ここまでクリボーの移動・重力処理 ---
-
-            # マリオがクリボーを踏んだか判定
-            if not kuribo_squashed and not mario_dead and mario_rect.colliderect(kuribo_rect):
-                # マリオが上からクリボーに当たったか判定
-                # マリオの下端がクリボーの上端より上から接触し、かつマリオが下向きに落下している場合
-                if mario_vy > 0 and mario_rect.bottom - kuribo_rect.top < 16 * SCALE and mario_rect.centery < kuribo_rect.centery:
-                    kuribo_squashed = True
-                    kuribo_squash_timer = 0
-                    kuribo_vx = 0
-                    kuribo_vy = 0
-                    # マリオを少し跳ね返す
-                    mario_vy = -JUMP_POWER * 0.6
-                else:
-                    # 横や下から当たった場合はマリオ死亡
-                    mario_dead = True
-                    mario_death_timer = 0
-                    # 死亡時のジャンプ
-                    mario_vy = MARIO_DEATH_JUMP_VY
-                    # 死亡時はジャンプ中扱い
-                    jumping = False
-                    on_ground = False
-
-            # 潰れた後のタイマー処理
-            if kuribo_squashed:
-                kuribo_squash_timer += 1
-                if kuribo_squash_timer >= KURIBO_SQUASH_DURATION:
-                    kuribo_alive = False
-
-        # アニメーションの選択
-        # 歩く時はアニメーションするように修正
-        if mario_dead:
-            current_image = mario_death
-            walk_frame = 0
-            walk_timer = 0
-        elif not on_ground:
-            current_image = mario_jump
-            walk_frame = 0
-            walk_timer = 0
-        elif abs(mario_vx) > 0.5:
-            walk_timer += 1
-            if walk_timer >= MARIO_WALK_ANIM_INTERVAL:
-                walk_frame = (walk_frame + 1) % len(mario_walk)
-                walk_timer = 0
-            current_image = mario_walk[walk_frame]
-        else:
-            current_image = mario_stand
-            walk_frame = 0
-            walk_timer = 0
-
-        # 向きの反転
-        if not facing_right and not mario_dead:
-            current_image = pygame.transform.flip(current_image, True, False)
-
-        # クリボーのアニメーション更新
-        if kuribo_alive and not kuribo_squashed:
-            kuribo_timer += 1
-            if kuribo_timer >= KURIBO_ANIM_INTERVAL:
-                kuribo_frame = (kuribo_frame + 1) % 2
-                kuribo_timer = 0
+        # マリオとクリボーの当たり判定
+        if kuribo.alive and not kuribo.squashed and not mario.dead and mario.rect.colliderect(kuribo.rect):
+            # マリオが上からクリボーに当たったか判定
+            if mario.vy > 0 and mario.rect.bottom - kuribo.rect.top < 16 * SCALE and mario.rect.centery < kuribo.rect.centery:
+                kuribo.squash()
+                mario.vy = -JUMP_POWER * 0.6
+            else:
+                mario.die()
 
         screen.fill((92, 148, 252))  # マリオの空色
 
         # 床の描画
         pygame.draw.rect(screen, (160, 82, 45), floor_rect)
 
-        # クリボーの描画（歩行アニメーションまたは潰れた画像）
-        if kuribo_alive:
-            if kuribo_squashed:
-                # 潰れた画像を描画
-                # 潰れた画像の下端を元のクリボーの下端に合わせる
-                death_rect = kuribo_death_img.get_rect()
-                death_rect.midbottom = kuribo_rect.midbottom
-                screen.blit(kuribo_death_img, death_rect)
-            else:
-                # 進行方向による画像の左右反転は行わず、歩行アニメーションのみ
-                kuribo_draw_img = kuribo_walk[kuribo_frame]
-                screen.blit(kuribo_draw_img, kuribo_rect)
-        # kuribo_aliveがFalseなら何も描画しない（消える）
+        # スプライト描画
+        if kuribo.alive:
+            screen.blit(kuribo.image, kuribo.rect)
+        screen.blit(mario.image, mario.rect)
 
-        # マリオの描画
-        screen.blit(current_image, mario_rect)
         pygame.display.flip()
         clock.tick(60)
 
