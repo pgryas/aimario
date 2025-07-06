@@ -4,6 +4,7 @@ class Block:
     def __init__(self, image, x, y):
         self.image = image
         self.rect = self.image.get_rect(topleft=(x, y))
+        self.base_x = x
         self.base_y = y
         self.bounce_offset = 0.0
         self.bouncing = False
@@ -28,8 +29,12 @@ class Block:
         else:
             self.rect.y = self.base_y
 
-    def draw(self, surface):
-        surface.blit(self.image, self.rect)
+    def draw(self, surface, camera_x):
+        # camera_x分だけ左にずらして描画
+        draw_rect = self.rect.copy()
+        draw_rect.x -= camera_x
+        surface.blit(self.image, draw_rect)
+
 import sys
 import os
 
@@ -63,23 +68,24 @@ def load_and_scale(path):
     return pygame.transform.scale(img, (img.get_width() * SCALE, img.get_height() * SCALE))
 
 # タイルマップ（0:空, 1:床, 2:ブロック）
+# 横スクロール用に横幅を拡張
 TILEMAP = [
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
 ]
 
 # 下2行を床にする
@@ -91,6 +97,9 @@ for y in range(len(TILEMAP)-2, len(TILEMAP)):
 TILEMAP[10][5] = 2
 TILEMAP[10][6] = 2
 TILEMAP[7][10] = 2
+TILEMAP[10][20] = 2
+TILEMAP[7][25] = 2
+TILEMAP[12][28] = 2
 
 # --- 床(t==1)のみ返す。ブロック(t==2)はBlockクラスで管理 ---
 def get_tile_rects():
@@ -223,12 +232,13 @@ class Mario(pygame.sprite.Sprite):
                         self.rect.top = block.rect.bottom
                         # self.vy = 0  # ここをコメントアウトまたは削除
 
-            # 画面外に出ないように
+            # マップ外に出ないように（マップ全体の範囲で制限）
+            map_pixel_width = len(TILEMAP[0]) * TILE_SIZE_SCALED
             if self.rect.left < 0:
                 self.rect.left = 0
                 self.vx = 0
-            if self.rect.right > SCREEN_WIDTH * SCALE:
-                self.rect.right = SCREEN_WIDTH * SCALE
+            if self.rect.right > map_pixel_width:
+                self.rect.right = map_pixel_width
                 self.vx = 0
 
             # アニメーション
@@ -337,12 +347,13 @@ class Kuribo(pygame.sprite.Sprite):
                         self.rect.top = block.rect.bottom
                         self.vy = 0
 
-            # 画面端で反転
+            # マップ端で反転
+            map_pixel_width = len(TILEMAP[0]) * TILE_SIZE_SCALED
             if self.rect.left < 0:
                 self.rect.left = 0
                 self.vx = KURIBO_WALK_SPEED
-            if self.rect.right > SCREEN_WIDTH * SCALE:
-                self.rect.right = SCREEN_WIDTH * SCALE
+            if self.rect.right > map_pixel_width:
+                self.rect.right = map_pixel_width
                 self.vx = -KURIBO_WALK_SPEED
 
             # アニメーション
@@ -432,6 +443,12 @@ def main():
     clock = pygame.time.Clock()
     running = True
 
+    # カメラのx座標
+    camera_x = 0
+
+    # マップのピクセル幅
+    map_pixel_width = len(TILEMAP[0]) * TILE_SIZE_SCALED
+
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -478,23 +495,40 @@ def main():
         for block in blocks:
             block.update()
 
+        # カメラのx座標をマリオ中心で更新
+        # マリオが画面中央より右に行ったらカメラを右に動かす
+        # 画面中央より左に行ったらカメラを左に動かす
+        mario_center_x = mario.rect.centerx
+        camera_x = mario_center_x - (SCREEN_WIDTH * SCALE) // 2
+        # カメラの範囲をマップ内に制限
+        camera_x = max(0, min(camera_x, map_pixel_width - SCREEN_WIDTH * SCALE))
+
         screen.fill((92, 148, 252))  # マリオの空色
 
-        # タイルマップの描画
+        # タイルマップの描画（カメラ分ずらす）
         for y, row in enumerate(TILEMAP):
             for x, t in enumerate(row):
                 if t == 1:
-                    screen.blit(wall_img, (x * TILE_SIZE_SCALED, y * TILE_SIZE_SCALED))
+                    draw_x = x * TILE_SIZE_SCALED - camera_x
+                    draw_y = y * TILE_SIZE_SCALED
+                    # 画面外は描画しない
+                    if -TILE_SIZE_SCALED < draw_x < SCREEN_WIDTH * SCALE:
+                        screen.blit(wall_img, (draw_x, draw_y))
                 # ブロックはBlockクラスで描画するのでここでは描画しない
 
         # ブロックの描画
         for block in blocks:
-            block.draw(screen)
+            block.draw(screen, camera_x)
 
         # スプライト描画
+        # マリオとクリボーの描画位置もカメラ分ずらす
         if kuribo.alive:
-            screen.blit(kuribo.image, kuribo.rect)
-        screen.blit(mario.image, mario.rect)
+            kuribo_draw_rect = kuribo.rect.copy()
+            kuribo_draw_rect.x -= camera_x
+            screen.blit(kuribo.image, kuribo_draw_rect)
+        mario_draw_rect = mario.rect.copy()
+        mario_draw_rect.x -= camera_x
+        screen.blit(mario.image, mario_draw_rect)
 
         pygame.display.flip()
         clock.tick(60)
