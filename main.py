@@ -1,17 +1,51 @@
 import pygame
 
-# 床の情報
-FLOOR_Y = 200  # 画面下から少し上に床を設置（SCALEをかけない値に修正）
-FLOOR_HEIGHT = 16  # 床の厚み（SCALEをかけない値に修正）
+class Block:
+    def __init__(self, image, x, y):
+        self.image = image
+        self.rect = self.image.get_rect(topleft=(x, y))
+        self.base_x = x
+        self.base_y = y
+        self.bounce_offset = 0.0
+        self.bouncing = False
+        self.bounce_speed = -8.0  # 跳ね上がる初速（大きくして目立つように）
+        self.bounce_gravity = 1.0  # 跳ね上がる重力（大きくして戻りやすく）
+        self.bounce_vy = 0.0
+
+    def hit_from_below(self):
+        if not self.bouncing:
+            self.bouncing = True
+            self.bounce_vy = self.bounce_speed
+
+    def update(self):
+        if self.bouncing:
+            self.bounce_offset += self.bounce_vy
+            self.bounce_vy += self.bounce_gravity
+            if self.bounce_offset >= 0:
+                self.bounce_offset = 0
+                self.bouncing = False
+                self.bounce_vy = 0
+            self.rect.y = self.base_y + int(round(self.bounce_offset))
+        else:
+            self.rect.y = self.base_y
+
+    def draw(self, surface, camera_x):
+        # camera_x分だけ左にずらして描画
+        draw_rect = self.rect.copy()
+        draw_rect.x -= camera_x
+        surface.blit(self.image, draw_rect)
+
 import sys
 import os
 
-# 初代スーパーマリオの解像度
+# タイルサイズ
+TILE_SIZE = 16
+SCALE = 2
+TILE_SIZE_SCALED = TILE_SIZE * SCALE
+
+# 画面サイズ
 SCREEN_WIDTH = 256
 SCREEN_HEIGHT = 240
-
-# 倍率
-SCALE = 2
 
 # マリオのパラメータ
 MARIO_WALK_MAX_SPEED = 2.2 * SCALE
@@ -33,8 +67,51 @@ def load_and_scale(path):
     img = pygame.image.load(path).convert_alpha()
     return pygame.transform.scale(img, (img.get_width() * SCALE, img.get_height() * SCALE))
 
+# タイルマップ（0:空, 1:床, 2:ブロック）
+# 横スクロール用に横幅を拡張
+TILEMAP = [
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+]
+
+# 下2行を床にする
+for y in range(len(TILEMAP)-2, len(TILEMAP)):
+    for x in range(len(TILEMAP[0])):
+        TILEMAP[y][x] = 1
+
+# 適当にブロックを配置
+TILEMAP[10][5] = 2
+TILEMAP[10][6] = 2
+TILEMAP[7][10] = 2
+TILEMAP[10][20] = 2
+TILEMAP[7][25] = 2
+TILEMAP[12][28] = 2
+
+# --- 床(t==1)のみ返す。ブロック(t==2)はBlockクラスで管理 ---
+def get_tile_rects():
+    rects = []
+    for y, row in enumerate(TILEMAP):
+        for x, t in enumerate(row):
+            if t == 1:  # 床だけ
+                rects.append(pygame.Rect(x * TILE_SIZE_SCALED, y * TILE_SIZE_SCALED, TILE_SIZE_SCALED, TILE_SIZE_SCALED))
+    return rects
+
 class Mario(pygame.sprite.Sprite):
-    def __init__(self, images, pos, floor_rect):
+    def __init__(self, images, pos, tile_rects, blocks):
         super().__init__()
         self.images = images  # dict: stand, walk(list), jump, death
         self.image = self.images['stand']
@@ -54,7 +131,8 @@ class Mario(pygame.sprite.Sprite):
         self.MARIO_DEATH_JUMP_VY = -8.0 * SCALE
         self.MARIO_DEATH_GRAVITY = 0.35 * SCALE
         self.MARIO_DEATH_DURATION = 120
-        self.floor_rect = floor_rect
+        self.tile_rects = tile_rects
+        self.blocks = blocks  # Blockインスタンスのリスト
 
     def update(self, keys):
         if not self.dead:
@@ -101,29 +179,66 @@ class Mario(pygame.sprite.Sprite):
             else:
                 self.jumping = False
 
+            # 横移動
             self.rect.x += int(self.vx)
+            # 横方向の当たり判定（床）
+            for tile in self.tile_rects():
+                if self.rect.colliderect(tile):
+                    if self.vx > 0:
+                        self.rect.right = tile.left
+                        self.vx = 0
+                    elif self.vx < 0:
+                        self.rect.left = tile.right
+                        self.vx = 0
+            # 横方向の当たり判定（ブロック）
+            for block in self.blocks:
+                if self.rect.colliderect(block.rect):
+                    if self.vx > 0:
+                        self.rect.right = block.rect.left
+                        self.vx = 0
+                    elif self.vx < 0:
+                        self.rect.left = block.rect.right
+                        self.vx = 0
+
+            # 重力
             self.vy += GRAVITY
             self.rect.y += int(self.vy)
+            self.on_ground = False
+            # 縦方向の当たり判定（床）
+            for tile in self.tile_rects():
+                if self.rect.colliderect(tile):
+                    if self.vy > 0:
+                        self.rect.bottom = tile.top
+                        self.vy = 0
+                        self.on_ground = True
+                        self.jumping = False
+                        self.jump_hold_count = 0
+                    elif self.vy < 0:
+                        self.rect.top = tile.bottom
+                        self.vy = 0
+            # 縦方向の当たり判定（ブロック）
+            for block in self.blocks:
+                if self.rect.colliderect(block.rect):
+                    if self.vy > 0:
+                        self.rect.bottom = block.rect.top
+                        self.vy = 0
+                        self.on_ground = True
+                        self.jumping = False
+                        self.jump_hold_count = 0
+                    elif self.vy < 0:
+                        # ブロックは跳ね上がるが、床は跳ね上がらない
+                        # ここでvyを0にしてしまうと、mainループでの跳ね上がり判定に使えない
+                        # vyを0にせず、mainループでの跳ね上がり判定後にvyを0にする
+                        self.rect.top = block.rect.bottom
+                        # self.vy = 0  # ここをコメントアウトまたは削除
 
-            # 床との接地判定
-            if self.rect.colliderect(self.floor_rect):
-                if self.vy >= 0 and self.rect.bottom - self.floor_rect.top < 32 * SCALE:
-                    self.rect.bottom = self.floor_rect.top
-                    self.vy = 0
-                    self.on_ground = True
-                    self.jumping = False
-                    self.jump_hold_count = 0
-                else:
-                    self.on_ground = False
-            else:
-                self.on_ground = False
-
-            # 画面外に出ないように
+            # マップ外に出ないように（マップ全体の範囲で制限）
+            map_pixel_width = len(TILEMAP[0]) * TILE_SIZE_SCALED
             if self.rect.left < 0:
                 self.rect.left = 0
                 self.vx = 0
-            if self.rect.right > SCREEN_WIDTH * SCALE:
-                self.rect.right = SCREEN_WIDTH * SCALE
+            if self.rect.right > map_pixel_width:
+                self.rect.right = map_pixel_width
                 self.vx = 0
 
             # アニメーション
@@ -162,7 +277,7 @@ class Mario(pygame.sprite.Sprite):
         self.on_ground = False
 
 class Kuribo(pygame.sprite.Sprite):
-    def __init__(self, images, death_img, pos, floor_rect):
+    def __init__(self, images, death_img, pos, tile_rects, blocks):
         super().__init__()
         self.images = images  # list: walk frames
         self.death_img = death_img
@@ -178,32 +293,67 @@ class Kuribo(pygame.sprite.Sprite):
         self.squashed = False
         self.squash_timer = 0
         self.KURIBO_SQUASH_DURATION = 40
-        self.alive = True
-        self.floor_rect = floor_rect
+        self._alive = True
+        self.tile_rects = tile_rects
+        self.blocks = blocks  # Blockインスタンスのリスト
+
+    @property
+    def alive(self):
+        return self._alive
 
     def update(self):
         if not self.squashed:
             self.rect.x += int(self.vx)
+            # 横方向の当たり判定（床）
+            for tile in self.tile_rects():
+                if self.rect.colliderect(tile):
+                    if self.vx > 0:
+                        self.rect.right = tile.left
+                        self.vx = -KURIBO_WALK_SPEED
+                    elif self.vx < 0:
+                        self.rect.left = tile.right
+                        self.vx = KURIBO_WALK_SPEED
+            # 横方向の当たり判定（ブロック）
+            for block in self.blocks:
+                if self.rect.colliderect(block.rect):
+                    if self.vx > 0:
+                        self.rect.right = block.rect.left
+                        self.vx = -KURIBO_WALK_SPEED
+                    elif self.vx < 0:
+                        self.rect.left = block.rect.right
+                        self.vx = KURIBO_WALK_SPEED
+
             self.vy += KURIBO_GRAVITY
             self.rect.y += int(self.vy)
+            self.on_ground = False
+            # 縦方向の当たり判定（床）
+            for tile in self.tile_rects():
+                if self.rect.colliderect(tile):
+                    if self.vy > 0:
+                        self.rect.bottom = tile.top
+                        self.vy = 0
+                        self.on_ground = True
+                    elif self.vy < 0:
+                        self.rect.top = tile.bottom
+                        self.vy = 0
+            # 縦方向の当たり判定（ブロック）
+            for block in self.blocks:
+                if self.rect.colliderect(block.rect):
+                    if self.vy > 0:
+                        self.rect.bottom = block.rect.top
+                        self.vy = 0
+                        self.on_ground = True
+                    elif self.vy < 0:
+                        self.rect.top = block.rect.bottom
+                        self.vy = 0
 
-            # 床との接地判定
-            if self.rect.colliderect(self.floor_rect):
-                if self.vy >= 0 and self.rect.bottom - self.floor_rect.top < 32 * SCALE:
-                    self.rect.bottom = self.floor_rect.top
-                    self.vy = 0
-                    self.on_ground = True
-                else:
-                    self.on_ground = False
-            else:
-                self.on_ground = False
-
-            # 画面端で反転
+            # マップ端で反転
+            map_pixel_width = len(TILEMAP[0]) * TILE_SIZE_SCALED
             if self.rect.left < 0:
                 self.rect.left = 0
                 self.vx = KURIBO_WALK_SPEED
-            if self.rect.right > SCREEN_WIDTH * SCALE:
-                self.rect.right = SCREEN_WIDTH * SCALE
+            if self.rect.right > map_pixel_width:
+                self.rect.right = map_pixel_width
                 self.vx = -KURIBO_WALK_SPEED
 
             # アニメーション
@@ -220,7 +370,7 @@ class Kuribo(pygame.sprite.Sprite):
             death_rect.midbottom = self.rect.midbottom
             self.rect = death_rect
             if self.squash_timer >= self.KURIBO_SQUASH_DURATION:
-                self.alive = False
+                self._alive = False
 
     def squash(self):
         self.squashed = True
@@ -250,12 +400,20 @@ def main():
     ]
     kuribo_death_img = load_and_scale(os.path.join("images", "kuribo_death.png"))
 
-    floor_rect = pygame.Rect(
-        0,
-        FLOOR_Y * SCALE,
-        SCREEN_WIDTH * SCALE,
-        FLOOR_HEIGHT * SCALE
-    )
+    # タイル画像
+    wall_img = load_and_scale(os.path.join("images", "wall.png"))
+    block_img = load_and_scale(os.path.join("images", "block.png"))
+
+    # タイル当たり判定取得関数
+    def tile_rects():
+        return get_tile_rects()
+
+    # ブロックオブジェクトのリストを作成
+    blocks = []
+    for y, row in enumerate(TILEMAP):
+        for x, t in enumerate(row):
+            if t == 2:
+                blocks.append(Block(block_img, x * TILE_SIZE_SCALED, y * TILE_SIZE_SCALED))
 
     # スプライト生成
     mario = Mario(
@@ -265,15 +423,17 @@ def main():
             'jump': mario_jump,
             'death': mario_death
         },
-        pos=(SCREEN_WIDTH * SCALE // 2, (FLOOR_Y - 40) * SCALE),
-        floor_rect=floor_rect
+        pos=(SCREEN_WIDTH * SCALE // 2, 10 * TILE_SIZE_SCALED),
+        tile_rects=tile_rects,
+        blocks=blocks
     )
 
     kuribo = Kuribo(
         images=kuribo_walk,
         death_img=kuribo_death_img,
-        pos=(80 * SCALE, FLOOR_Y * SCALE),
-        floor_rect=floor_rect
+        pos=(80 * SCALE, 10 * TILE_SIZE_SCALED),
+        tile_rects=tile_rects,
+        blocks=blocks
     )
 
     all_sprites = pygame.sprite.Group()
@@ -282,6 +442,12 @@ def main():
 
     clock = pygame.time.Clock()
     running = True
+
+    # カメラのx座標
+    camera_x = 0
+
+    # マップのピクセル幅
+    map_pixel_width = len(TILEMAP[0]) * TILE_SIZE_SCALED
 
     while running:
         for event in pygame.event.get():
@@ -310,15 +476,59 @@ def main():
             else:
                 mario.die()
 
+        # マリオがブロックを下から叩いたか判定
+        for block in blocks:
+            # マリオの頭がブロックに当たった瞬間のみ跳ね上げる
+            prev_top = mario.rect.top - int(mario.vy)
+            # 修正版: prev_topがblock.rect.bottom以上、かつ現在のtopがblock.rect.bottom以下（未満だと1ピクセルのズレで判定されないことがある）
+            if (mario.vy < 0 and
+                prev_top >= block.rect.bottom and
+                mario.rect.top <= block.rect.bottom and
+                mario.rect.right > block.rect.left and
+                mario.rect.left < block.rect.right):
+                block.hit_from_below()
+                # 跳ね上がり判定後にvyを0にする
+                mario.vy = 0
+        # ※床は跳ね上がらない（床はBlockクラスで管理されていない）
+
+        # ブロックの更新
+        for block in blocks:
+            block.update()
+
+        # カメラのx座標をマリオ中心で更新
+        # マリオが画面中央より右に行ったらカメラを右に動かす
+        # 画面中央より左に行ったらカメラを左に動かす
+        mario_center_x = mario.rect.centerx
+        camera_x = mario_center_x - (SCREEN_WIDTH * SCALE) // 2
+        # カメラの範囲をマップ内に制限
+        camera_x = max(0, min(camera_x, map_pixel_width - SCREEN_WIDTH * SCALE))
+
         screen.fill((92, 148, 252))  # マリオの空色
 
-        # 床の描画
-        pygame.draw.rect(screen, (160, 82, 45), floor_rect)
+        # タイルマップの描画（カメラ分ずらす）
+        for y, row in enumerate(TILEMAP):
+            for x, t in enumerate(row):
+                if t == 1:
+                    draw_x = x * TILE_SIZE_SCALED - camera_x
+                    draw_y = y * TILE_SIZE_SCALED
+                    # 画面外は描画しない
+                    if -TILE_SIZE_SCALED < draw_x < SCREEN_WIDTH * SCALE:
+                        screen.blit(wall_img, (draw_x, draw_y))
+                # ブロックはBlockクラスで描画するのでここでは描画しない
+
+        # ブロックの描画
+        for block in blocks:
+            block.draw(screen, camera_x)
 
         # スプライト描画
+        # マリオとクリボーの描画位置もカメラ分ずらす
         if kuribo.alive:
-            screen.blit(kuribo.image, kuribo.rect)
-        screen.blit(mario.image, mario.rect)
+            kuribo_draw_rect = kuribo.rect.copy()
+            kuribo_draw_rect.x -= camera_x
+            screen.blit(kuribo.image, kuribo_draw_rect)
+        mario_draw_rect = mario.rect.copy()
+        mario_draw_rect.x -= camera_x
+        screen.blit(mario.image, mario_draw_rect)
 
         pygame.display.flip()
         clock.tick(60)
