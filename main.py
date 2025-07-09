@@ -1,7 +1,7 @@
 import pygame
 
 class Block:
-    def __init__(self, image, x, y):
+    def __init__(self, image, x, y, block_type="normal", alt_image=None, spawn_callback=None):
         self.image = image
         self.rect = self.image.get_rect(topleft=(x, y))
         self.base_x = x
@@ -11,16 +11,38 @@ class Block:
         self.bounce_speed = -8.0  # 跳ね上がる初速（大きくして目立つように）
         self.bounce_gravity = 1.0  # 跳ね上がる重力（大きくして戻りやすく）
         self.bounce_vy = 0.0
+        self.block_type = block_type  # normal or hatena
+        self.alt_image = alt_image  # 画像切り替え用（パネル画像）
+        self.used = False  # はてなブロックが叩かれたか
+        self.spawn_callback = spawn_callback  # キノコ生成用コールバック
+        self._mushroom_spawned = False  # キノコ生成済みフラグ
 
     def hit_from_below(self):
+        # パネル（used=True）になったはてなブロックは跳ね上がらない
+        if self.block_type == "hatena" and self.used:
+            return
         if not self.bouncing:
             self.bouncing = True
             self.bounce_vy = self.bounce_speed
+            if self.block_type == "hatena" and not self.used:
+                self.used = True
+                if self.alt_image:
+                    self.image = self.alt_image
+                # キノコ生成は跳ね上がり頂点で行う
+                self._mushroom_spawned = False
 
     def update(self):
         if self.bouncing:
             self.bounce_offset += self.bounce_vy
+            prev_bounce_vy = self.bounce_vy
             self.bounce_vy += self.bounce_gravity
+            # 跳ね上がり頂点（下がり始め）でキノコ生成
+            if self.block_type == "hatena" and self.used and not self._mushroom_spawned:
+                if prev_bounce_vy < 0 and self.bounce_vy >= 0:  # 上昇→下降に切り替わる瞬間
+                    if self.spawn_callback:
+                        # ブロックの中央下端から出現
+                        self.spawn_callback(self.rect.centerx, self.rect.bottom)
+                    self._mushroom_spawned = True
             if self.bounce_offset >= 0:
                 self.bounce_offset = 0
                 self.bouncing = False
@@ -67,10 +89,9 @@ def load_and_scale(path):
     img = pygame.image.load(path).convert_alpha()
     return pygame.transform.scale(img, (img.get_width() * SCALE, img.get_height() * SCALE))
 
-# タイルマップ（0:空, 1:床, 2:ブロック）
+# タイルマップ（0:空, 1:床, 2:ブロック, 3:はてなブロック）
 # 横スクロール用に横幅を拡張
 TILEMAP = [
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
     [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
     [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
     [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
@@ -96,9 +117,9 @@ for y in range(len(TILEMAP)-2, len(TILEMAP)):
 # 適当にブロックを配置
 TILEMAP[10][5] = 2
 TILEMAP[10][6] = 2
-TILEMAP[7][10] = 2
+TILEMAP[10][10] = 3  # 新しいはてなブロック
 TILEMAP[10][20] = 2
-TILEMAP[7][25] = 2
+TILEMAP[10][25] = 3  # 新しいはてなブロック
 TILEMAP[12][28] = 2
 
 # --- 床(t==1)のみ返す。ブロック(t==2)はBlockクラスで管理 ---
@@ -378,6 +399,84 @@ class Kuribo(pygame.sprite.Sprite):
         self.vx = 0
         self.vy = 0
 
+# --- キノコクラス ---
+class Mushroom(pygame.sprite.Sprite):
+    def __init__(self, image, x, y, tile_rects, blocks):
+        super().__init__()
+        self.image = image
+        # 出現アニメーション用
+        self.spawn_height = TILE_SIZE_SCALED  # 1ブロック分せり上がる
+        self.spawn_speed = 1  # 1フレームに1pxずつ上昇（ゆっくり）
+        self.spawn_progress = 0
+        self.spawning = True
+        # yはブロックの下端。そこからspawn_height分だけ上にせり上がる
+        self.rect = self.image.get_rect(midbottom=(x, y))
+        # 速度設定（クリボーの半分、右向きで開始）
+        self.vx = abs(KURIBO_WALK_SPEED / 2)
+        self.vy = 0.0
+        self.tile_rects = tile_rects
+        self.blocks = blocks
+        self.on_ground = False
+        self.GRAVITY = GRAVITY
+        self._target_bottom = y - self.spawn_height
+
+    def update(self):
+        if self.spawning:
+            # 上にせり上がるアニメーション
+            if self.spawn_progress < self.spawn_height:
+                self.rect.y -= self.spawn_speed
+                self.spawn_progress += self.spawn_speed
+                if self.spawn_progress >= self.spawn_height:
+                    self.rect.y = self._target_bottom - self.image.get_height() + self.image.get_height()
+                    self.spawning = False
+            return
+
+        # 横移動（右向きで開始、以降は壁やブロックで反転）
+        self.rect.x += int(self.vx)
+        # 横方向の当たり判定（床）
+        for tile in self.tile_rects():
+            if self.rect.colliderect(tile):
+                if self.vx > 0:
+                    self.rect.right = tile.left
+                    self.vx = -self.vx
+                elif self.vx < 0:
+                    self.rect.left = tile.right
+                    self.vx = -self.vx
+        # 横方向の当たり判定（ブロック）
+        for block in self.blocks:
+            if self.rect.colliderect(block.rect):
+                if self.vx > 0:
+                    self.rect.right = block.rect.left
+                    self.vx = -self.vx
+                elif self.vx < 0:
+                    self.rect.left = block.rect.right
+                    self.vx = -self.vx
+
+        # 重力
+        self.vy += self.GRAVITY
+        self.rect.y += int(self.vy)
+        self.on_ground = False
+        # 縦方向の当たり判定（床）
+        for tile in self.tile_rects():
+            if self.rect.colliderect(tile):
+                if self.vy > 0:
+                    self.rect.bottom = tile.top
+                    self.vy = 0
+                    self.on_ground = True
+                elif self.vy < 0:
+                    self.rect.top = tile.bottom
+                    self.vy = 0
+        # 縦方向の当たり判定（ブロック）
+        for block in self.blocks:
+            if self.rect.colliderect(block.rect):
+                if self.vy > 0:
+                    self.rect.bottom = block.rect.top
+                    self.vy = 0
+                    self.on_ground = True
+                elif self.vy < 0:
+                    self.rect.top = block.rect.bottom
+                    self.vy = 0
+
 def main():
     pygame.init()
     screen = pygame.display.set_mode((SCREEN_WIDTH * SCALE, SCREEN_HEIGHT * SCALE))
@@ -403,6 +502,14 @@ def main():
     # タイル画像
     wall_img = load_and_scale(os.path.join("images", "wall.png"))
     block_img = load_and_scale(os.path.join("images", "block.png"))
+    hatena_img = load_and_scale(os.path.join("images", "hatena.png"))
+    panel_img = load_and_scale(os.path.join("images", "panel.png"))
+
+    # キノコ画像（なければblock_imgで仮）
+    try:
+        mushroom_img = load_and_scale(os.path.join("images", "kinoko.png"))
+    except:
+        mushroom_img = block_img
 
     # タイル当たり判定取得関数
     def tile_rects():
@@ -410,10 +517,15 @@ def main():
 
     # ブロックオブジェクトのリストを作成
     blocks = []
+    mushrooms = []  # キノコリスト
+    def spawn_mushroom(x, y):
+        mushrooms.append(Mushroom(mushroom_img, x, y, tile_rects, blocks))
     for y, row in enumerate(TILEMAP):
         for x, t in enumerate(row):
             if t == 2:
-                blocks.append(Block(block_img, x * TILE_SIZE_SCALED, y * TILE_SIZE_SCALED))
+                blocks.append(Block(block_img, x * TILE_SIZE_SCALED, y * TILE_SIZE_SCALED, block_type="normal"))
+            elif t == 3:
+                blocks.append(Block(hatena_img, x * TILE_SIZE_SCALED, y * TILE_SIZE_SCALED, block_type="hatena", alt_image=panel_img, spawn_callback=spawn_mushroom))
 
     # スプライト生成
     mario = Mario(
@@ -495,6 +607,10 @@ def main():
         for block in blocks:
             block.update()
 
+        # キノコの更新
+        for mushroom in mushrooms:
+            mushroom.update()
+
         # カメラのx座標をマリオ中心で更新
         # マリオが画面中央より右に行ったらカメラを右に動かす
         # 画面中央より左に行ったらカメラを左に動かす
@@ -516,7 +632,13 @@ def main():
                         screen.blit(wall_img, (draw_x, draw_y))
                 # ブロックはBlockクラスで描画するのでここでは描画しない
 
-        # ブロックの描画
+        # キノコの描画（ブロックより前＝先に描画）
+        for mushroom in mushrooms:
+            mushroom_draw_rect = mushroom.rect.copy()
+            mushroom_draw_rect.x -= camera_x
+            screen.blit(mushroom.image, mushroom_draw_rect)
+
+        # ブロックの描画（キノコの上に重ねる）
         for block in blocks:
             block.draw(screen, camera_x)
 
